@@ -1,0 +1,30 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs & Ledgers
+*.log
+*.jsonl
+token_usage.jsonl
+
+# Agent OS runtime state & artifacts
+.agent_os/
+demo_sandbox/
+
+# Environment variables & secrets (CRITICAL: NEVER COMMIT)
+.env
+.env.*
+*.env
+.env.local
+.env.production
+.env.development
+*.key
+*.pem
+*.secret
+secrets/
