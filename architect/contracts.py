@@ -183,6 +183,46 @@ class ConversationContext(BaseModel):
     @classmethod
     def validate_advisory_preferences(cls, v: list[str]) -> list[str]:
         for pref in v:
+            if not isinstance(pref, str):
+                raise ValueError("Each advisory preference must be a string.")
             if not (1 <= len(pref) <= 200):
                 raise ValueError("Each advisory preference must be between 1 and 200 characters.")
         return v
+
+    @classmethod
+    def snapshot_and_validate(cls, context: "ConversationContext") -> "ConversationContext":
+        """Construct a new, fully validated, independent snapshot of all context data.
+
+        Performs complete schema validation across all fields and nested collections,
+        detecting and rejecting post-instantiation mutations, invalid element types,
+        model_construct bypasses, contradictory outcomes, or boundary cap violations.
+        """
+        if not isinstance(context, cls):
+            raise ValueError(
+                f"conversation_context must be an instance of ConversationContext, got {type(context).__name__}."
+            )
+
+        if hasattr(context, "__dict__"):
+            extra_keys = (
+                set(context.__dict__.keys())
+                - set(cls.model_fields.keys())
+                - {"__pydantic_extra__", "__pydantic_fields_set__"}
+            )
+            if extra_keys:
+                raise ValueError(f"Extra fields forbidden in ConversationContext: {extra_keys}")
+
+        raw_data = {
+            "schema_version": getattr(context, "schema_version", None),
+            "conversation_id": getattr(context, "conversation_id", None),
+            "workspace_root": getattr(context, "workspace_root", None),
+            "prior_tasks": [
+                task.model_dump() if hasattr(task, "model_dump") else task
+                for task in getattr(context, "prior_tasks", [])
+            ],
+            "recent_messages": [
+                msg.model_dump() if hasattr(msg, "model_dump") else msg
+                for msg in getattr(context, "recent_messages", [])
+            ],
+            "advisory_preferences": list(getattr(context, "advisory_preferences", [])),
+        }
+        return cls.model_validate(raw_data)

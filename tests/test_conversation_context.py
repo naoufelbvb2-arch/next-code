@@ -359,11 +359,11 @@ async def test_h01_defensive_collection_cap_enforcement(tmp_path: Path) -> None:
     assert len(bypassed_ctx.prior_tasks) == 4
 
     agent_os = AgentOS(workspace_root=ws)
-    with pytest.raises(ValueError, match="collection caps exceeded at trust boundary"):
+    with pytest.raises((ValidationError, ValueError)):
         await agent_os.execute_task("Goal", conversation_context=bypassed_ctx)
 
     mock_gw = MagicMock(spec=ModelGateway)
-    with pytest.raises(ValueError, match="collection caps exceeded at trust boundary"):
+    with pytest.raises((ValidationError, ValueError)):
         LeadArchitectLoop(
             workspace_root=ws,
             gateway=mock_gw,
@@ -448,79 +448,269 @@ def test_h03_workspace_root_metadata_bounds(tmp_path: Path) -> None:
 
 
 # ==============================================================================
-# 7. Controlled Rollback Exercise Across Two Sequential Tasks (F03/F04)
+# 7. Genuine Two-Task Execution and Rollback Regression (R02-F01)
 # ==============================================================================
 @pytest.mark.asyncio
-async def test_controlled_rollback_and_cross_task_isolation(tmp_path: Path) -> None:
-    """Exercise an actual controlled rollback in Task 2 and verify Task 1 state & files remain intact."""
-    ws = tmp_path / "ws_rollback_exercise"
+async def test_two_task_agent_os_execution_and_gate3_rollback(tmp_path: Path) -> None:
+    """Exercise genuine two-task AgentOS execution, state isolation, and Gate 3 auto-rollback."""
+    ws = tmp_path / "ws_two_task_exec"
     ws.mkdir()
     init_git_repo(ws)
     state_dir = ws / ".agent_os" / "state"
 
+    # Pre-existing repository file
+    calc_file = ws / "calc.py"
+    calc_file.write_text("STATUS = 'ORIGINAL'\n", encoding="utf-8")
+    subprocess.run(["git", "add", "calc.py"], cwd=str(ws), check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "add calc.py"], cwd=str(ws), check=True, capture_output=True)
+
     agent_os = AgentOS(workspace_root=ws)
 
-    # 1. Execute Task 1: creates an artifact, commits it, finishes successfully
-    file_t1 = ws / "task1_permanent.py"
-    file_t1.write_text("def task1(): pass\n", encoding="utf-8")
-    subprocess.run(["git", "add", "task1_permanent.py"], cwd=str(ws), check=True)
-    subprocess.run(["git", "commit", "-m", "task1 complete"], cwd=str(ws), check=True)
-
-    agent_os.gateway.generate_structured = AsyncMock(
-        return_value=(
-            ArchitectDecision(
-                situation_assessment="Task 1 finished",
-                mental_simulation=MentalSimulation(hypothesis="None", verification_strategy="None"),
-                new_phase=TaskPhase.COMPLETED,
-                next_action=ArchitectAction.COMPLETE_TASK,
-                final_response="Task 1 successful",
+    # --------------------------------------------------------------------------
+    # TASK 1: Implement add() via SURGEON and verify via INQUISITOR
+    # --------------------------------------------------------------------------
+    t1_decisions = [
+        ArchitectDecision(
+            situation_assessment="Dispatch surgeon to implement add function.",
+            mental_simulation=MentalSimulation(hypothesis="Add function implementation", verification_strategy="Inquisitor inspection"),
+            new_phase=TaskPhase.EXECUTING,
+            next_action=ArchitectAction.DISPATCH_SURGEON,
+            task_contract=TaskContract(
+                contract_id="c_t1_surg",
+                target_role="SURGEON",
+                objective="Implement add function in calc.py",
+                target_files=["calc.py"],
+                context_briefing="Implement def add(a, b): return a + b",
+                acceptance_criteria=["add function exists"],
             ),
-            make_token_usage(20),
-        )
+        ),
+        ArchitectDecision(
+            situation_assessment="Dispatch inquisitor to verify patch.",
+            mental_simulation=MentalSimulation(hypothesis="Verify diff", verification_strategy="Git diff check"),
+            new_phase=TaskPhase.VERIFYING,
+            next_action=ArchitectAction.DISPATCH_INQUISITOR,
+            task_contract=TaskContract(
+                contract_id="c_t1_inq",
+                target_role="INQUISITOR",
+                objective="Verify add function git diff",
+                target_files=["calc.py"],
+                context_briefing="Verify calc.py diff",
+            ),
+        ),
+        ArchitectDecision(
+            situation_assessment="Task 1 finished successfully.",
+            mental_simulation=MentalSimulation(hypothesis="Complete", verification_strategy="None"),
+            new_phase=TaskPhase.COMPLETED,
+            next_action=ArchitectAction.COMPLETE_TASK,
+            final_response="Task 1 complete: add function implemented and verified.",
+        ),
+    ]
+
+    async def mock_dispatch_t1(contract: TaskContract, ctx, git_diff: str) -> WorkerReport:
+        if contract.target_role == "SURGEON":
+            calc_file.write_text("STATUS = 'ORIGINAL'\ndef add(a, b):\n    return a + b\n", encoding="utf-8")
+            return WorkerReport(
+                contract_id=contract.contract_id,
+                worker_role="SURGEON",
+                status=WorkerStatus.SUCCESS,
+                summary="Implemented add function in calc.py",
+                modified_files=["calc.py"],
+            )
+        elif contract.target_role == "INQUISITOR":
+            return WorkerReport(
+                contract_id=contract.contract_id,
+                worker_role="INQUISITOR",
+                status=WorkerStatus.SUCCESS,
+                summary="Inquisitor approved add function",
+                inquisitor_verdict=InquisitorVerdict.APPROVED,
+            )
+        return WorkerReport(contract_id=contract.contract_id, worker_role=contract.target_role, status=WorkerStatus.SUCCESS, summary="ok")
+
+    class MockDispatcherT1:
+        async def dispatch(self, contract: TaskContract, ctx, git_diff: str) -> WorkerReport:
+            return await mock_dispatch_t1(contract, ctx, git_diff)
+
+    agent_os.dispatcher = MockDispatcherT1()
+    t1_iter = iter(t1_decisions)
+    agent_os.gateway.generate_structured = AsyncMock(
+        side_effect=lambda **kw: (next(t1_iter), make_token_usage(20, "task_turn_01"))
     )
 
-    outcome_1 = await agent_os.execute_task("Task 1 goal", task_id="task_turn_01")
+    outcome_1 = await agent_os.execute_task("Implement add function in calc.py", task_id="task_turn_01")
+
+    # Assert Task 1 outcome and artifact
     assert outcome_1.success is True
-    assert file_t1.exists()
+    assert outcome_1.final_phase == TaskPhase.COMPLETED
+    assert outcome_1.task_id == "task_turn_01"
+    assert "def add(a, b):" in calc_file.read_text(encoding="utf-8")
 
-    state_t1_before = json.loads((state_dir / "task_turn_01.json").read_text(encoding="utf-8"))
+    # Record Task 1 state and checkpoint baseline
+    t1_state_path = state_dir / "task_turn_01.json"
+    assert t1_state_path.exists()
+    t1_state_json = t1_state_path.read_text(encoding="utf-8")
+    t1_data = json.loads(t1_state_json)
+    t1_baseline_hash = t1_data["checkpoint_history"][0]
+    assert t1_baseline_hash is not None
 
-    # 2. Execute Task 2 with Task 1 in context
+    # Verify Task 1 git refs are commit-hash based
+    for cp_hash in t1_data["checkpoint_history"]:
+        ref_check = subprocess.run(
+            ["git", "rev-parse", f"refs/agent_checkpoints/{cp_hash}"],
+            cwd=str(ws), capture_output=True, text=True
+        )
+        assert ref_check.returncode == 0, f"Git ref refs/agent_checkpoints/{cp_hash} must exist"
+
+    # --------------------------------------------------------------------------
+    # TASK 2: Drive actual Gate 3 auto-rollback and verify isolation
+    # --------------------------------------------------------------------------
     ctx_t2 = ConversationContext(
-        conversation_id="conv_thread",
+        conversation_id="conv_desktop_thread",
         workspace_root=ws,
         prior_tasks=[
             PriorTaskReference(
                 task_id=outcome_1.task_id,
-                task_goal="Task 1 goal",
+                task_goal="Implement add function in calc.py",
                 success=outcome_1.success,
                 final_phase=outcome_1.final_phase,
                 summary=outcome_1.summary,
             )
         ],
+        recent_messages=[
+            HistoricalMessage(role="user", content="Now try to implement experimental multiply but be cautious.")
+        ],
+        advisory_preferences=["Roll back immediately on failure"],
     )
 
-    # Simulate Task 2 creating an unstable file and triggering a controlled rollback
-    checkpointer = GitShadowCheckpointer(ws)
-    t2_baseline = checkpointer.create_checkpoint("task2_pre_surgery")
+    t2_decisions = [
+        # Tick 1: SURGEON attempts flawed patch (Gate 2 creates pre-surgery checkpoint)
+        ArchitectDecision(
+            situation_assessment="Dispatch surgeon for experimental multiply.",
+            mental_simulation=MentalSimulation(hypothesis="Add multiply function", verification_strategy="Syntax test"),
+            new_phase=TaskPhase.EXECUTING,
+            next_action=ArchitectAction.DISPATCH_SURGEON,
+            task_contract=TaskContract(
+                contract_id="c_t2_surg",
+                target_role="SURGEON",
+                objective="Add experimental multiply to calc.py",
+                target_files=["calc.py"],
+                context_briefing="Add def multiply",
+            ),
+        ),
+        # Tick 2: Architect decides to ABORT after seeing the failure in the graveyard
+        ArchitectDecision(
+            situation_assessment="Surgeon failed and was rolled back by Gate 3.",
+            mental_simulation=MentalSimulation(hypothesis="Abort task after rollback", verification_strategy="None"),
+            new_phase=TaskPhase.FAILED,
+            next_action=ArchitectAction.ABORT_TASK,
+            final_response="Task 2 aborted: surgeon patch failed and was safely rolled back.",
+        ),
+    ]
 
-    unstable_file = ws / "task2_unstable.py"
-    unstable_file.write_text("broken mutation\n", encoding="utf-8")
+    async def mock_dispatch_t2(contract: TaskContract, ctx, git_diff: str) -> WorkerReport:
+        if contract.target_role == "SURGEON":
+            # Simulate corrupting mutation on disk
+            calc_file.write_text("CORRUPTED_SYNTAX_ERROR = ???\n", encoding="utf-8")
+            return WorkerReport(
+                contract_id=contract.contract_id,
+                worker_role="SURGEON",
+                status=WorkerStatus.FAILED,
+                summary="SyntaxError encountered during AST patch application",
+                error_details="SyntaxError: invalid syntax at line 1",
+                modified_files=["calc.py"],
+            )
+        return WorkerReport(contract_id=contract.contract_id, worker_role=contract.target_role, status=WorkerStatus.SUCCESS, summary="ok")
+
+    class MockDispatcherT2:
+        async def dispatch(self, contract: TaskContract, ctx, git_diff: str) -> WorkerReport:
+            return await mock_dispatch_t2(contract, ctx, git_diff)
+
+    agent_os.dispatcher = MockDispatcherT2()
+    t2_iter = iter(t2_decisions)
+    agent_os.gateway.generate_structured = AsyncMock(
+        side_effect=lambda **kw: (next(t2_iter), make_token_usage(20, "task_turn_02"))
+    )
+
+    outcome_2 = await agent_os.execute_task(
+        "Implement experimental multiply",
+        task_id="task_turn_02",
+        conversation_context=ctx_t2,
+    )
+
+    # Invariants after Task 2 execution & Gate 3 auto-rollback:
+    # 1. Task 2 truthfully reports failure and rollbacks triggered
+    assert outcome_2.success is False
+    assert outcome_2.final_phase == TaskPhase.FAILED
+    assert outcome_2.rollbacks_triggered == 1
+    assert outcome_2.task_id == "task_turn_02"
+
+    # 2. Corrupted file content on disk was purged by real Gate 3 rollback
+    calc_disk = calc_file.read_text(encoding="utf-8")
+    assert "CORRUPTED_SYNTAX_ERROR" not in calc_disk
+    # 3. Task 1 valid artifact is 100% intact
+    assert "def add(a, b):" in calc_disk
+    assert "STATUS = 'ORIGINAL'" in calc_disk
+
+    # 4. Task 1 JSON state on disk was untouched and remains identical
+    t1_state_after = t1_state_path.read_text(encoding="utf-8")
+    assert t1_state_json == t1_state_after
+
+    # 5. Task 2 Blackboard state was created independently
+    t2_state_path = state_dir / "task_turn_02.json"
+    assert t2_state_path.exists()
+    t2_data = json.loads(t2_state_path.read_text(encoding="utf-8"))
+    assert t2_data["task_id"] == "task_turn_02"
+    assert t2_data["task_goal"] == "Implement experimental multiply"
+    assert len(t2_data["failed_hypotheses"]) == 1
+    assert "Surgeon Failed" in t2_data["failed_hypotheses"][0]["failure_reason"]
+
+    # 6. Task 2 has a distinct recorded baseline
+    t2_baseline_hash = t2_data["checkpoint_history"][0]
+    assert t2_baseline_hash is not None
+    assert t2_baseline_hash != t1_baseline_hash
+
+    # 7. Git refs are commit-hash based under refs/agent_checkpoints/{hash}, NOT namespaced by task ID
+    for cp_hash in t2_data["checkpoint_history"]:
+        ref_check = subprocess.run(
+            ["git", "rev-parse", f"refs/agent_checkpoints/{cp_hash}"],
+            cwd=str(ws), capture_output=True, text=True
+        )
+        assert ref_check.returncode == 0, f"Git ref refs/agent_checkpoints/{cp_hash} must exist"
+
+    # Verify no task-id namespaced refs exist
+    no_task_ref = subprocess.run(
+        ["git", "rev-parse", "refs/agent_checkpoints/task_turn_02"],
+        cwd=str(ws), capture_output=True, text=True
+    )
+    assert no_task_ref.returncode != 0
+
+
+# ==============================================================================
+# 7b. Supplementary Low-Level Checkpointer Rollback Test
+# ==============================================================================
+def test_manual_checkpointer_rollback_supplementary(tmp_path: Path) -> None:
+    """Supplementary unit test verifying standalone GitShadowCheckpointer rollback physics."""
+    ws = tmp_path / "ws_supp_checkpointer"
+    ws.mkdir()
+    init_git_repo(ws)
+
+    perm_file = ws / "permanent.py"
+    perm_file.write_text("VALID_DATA = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "permanent.py"], cwd=str(ws), check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "add permanent"], cwd=str(ws), check=True, capture_output=True)
+
+    checkpointer = GitShadowCheckpointer(ws)
+    baseline_cp = checkpointer.create_checkpoint("baseline")
+
+    unstable_file = ws / "unstable.py"
+    unstable_file.write_text("DIRTY_MUTATION\n", encoding="utf-8")
     assert unstable_file.exists()
 
-    # Perform actual physical rollback to pre-surgery baseline
-    checkpointer.rollback(t2_baseline)
+    checkpointer.rollback(baseline_cp)
 
-    # Invariants after rollback:
-    # - Task 2 unstable file was purged
     assert not unstable_file.exists()
-    # - Task 1 permanent file is 100% preserved
-    assert file_t1.exists()
-    assert file_t1.read_text(encoding="utf-8") == "def task1(): pass\n"
+    assert perm_file.exists()
+    assert perm_file.read_text(encoding="utf-8") == "VALID_DATA = 1\n"
 
-    # Verify Task 1 state file on disk was not modified or overwritten
-    state_t1_after = json.loads((state_dir / "task_turn_01.json").read_text(encoding="utf-8"))
-    assert state_t1_before == state_t1_after
 
 
 # ==============================================================================
@@ -714,3 +904,133 @@ async def test_strengthened_playbook_immunity_spied(tmp_path: Path) -> None:
     # Assert conversational keywords never leaked into playbook matcher
     assert "authentication" not in spied_calls[0]
     assert "refactor" not in spied_calls[0]
+
+
+# ==============================================================================
+# 11. Full Revalidation of Mutated Context at Both Trust Boundaries (R02-F02)
+# ==============================================================================
+@pytest.mark.asyncio
+async def test_r02_f02_boundary_revalidation_and_post_instantiation_mutations(tmp_path: Path) -> None:
+    """Deterministic negative tests asserting rejection of in-place mutated contexts before state creation."""
+    ws = tmp_path / "ws_revalidation"
+    ws.mkdir()
+    init_git_repo(ws)
+    state_dir = ws / ".agent_os" / "state"
+
+    agent_os = AgentOS(workspace_root=ws)
+
+    # Sub-case 1: Replace an existing message entry with invalid content/type (without changing list length)
+    msg1 = HistoricalMessage(role="user", content="Original valid message")
+    ctx1 = ConversationContext(
+        conversation_id="conv_neg_01",
+        workspace_root=ws,
+        recent_messages=[msg1],
+    )
+    # Mutate in-place without increasing list length
+    ctx1.recent_messages[0] = "invalid_string_not_a_historical_message"  # type: ignore
+
+    with pytest.raises((ValidationError, ValueError)):
+        await agent_os.execute_task("Goal", task_id="task_fail_01", conversation_context=ctx1)
+    assert not (state_dir / "task_fail_01.json").exists(), "State file must not be created on validation failure."
+
+    # Sub-case 2: Mutate preferences string beyond character limit (without changing list length)
+    ctx2 = ConversationContext(
+        conversation_id="conv_neg_02",
+        workspace_root=ws,
+        advisory_preferences=["Valid preference"],
+    )
+    # Mutate in-place to exceed 200 character cap
+    ctx2.advisory_preferences[0] = "P" * 201
+
+    with pytest.raises((ValidationError, ValueError)):
+        await agent_os.execute_task("Goal", task_id="task_fail_02", conversation_context=ctx2)
+    assert not (state_dir / "task_fail_02.json").exists()
+
+    # Sub-case 3: Mutate message content beyond character limit (without changing list length)
+    ctx3 = ConversationContext(
+        conversation_id="conv_neg_03",
+        workspace_root=ws,
+        recent_messages=[HistoricalMessage(role="user", content="Valid message")],
+    )
+    # Bypass constructor with model_construct to inject oversized string
+    ctx3.recent_messages[0] = HistoricalMessage.model_construct(role="user", content="M" * 1001)
+
+    with pytest.raises((ValidationError, ValueError)):
+        await agent_os.execute_task("Goal", task_id="task_fail_03", conversation_context=ctx3)
+    assert not (state_dir / "task_fail_03.json").exists()
+
+    # Sub-case 4: Contradict prior success/phase in-place (without changing list length)
+    task_init = PriorTaskReference(
+        task_id="t_ok",
+        task_goal="Goal",
+        success=True,
+        final_phase=TaskPhase.COMPLETED,
+        summary="Done",
+    )
+    ctx4 = ConversationContext(
+        conversation_id="conv_neg_04",
+        workspace_root=ws,
+        prior_tasks=[task_init],
+    )
+    # Mutate in-place with contradictory outcome using model_construct
+    ctx4.prior_tasks[0] = PriorTaskReference.model_construct(
+        task_id="t_ok",
+        task_goal="Goal",
+        success=True,
+        final_phase=TaskPhase.FAILED,
+        summary="Contradictory",
+    )
+
+    with pytest.raises((ValidationError, ValueError)):
+        await agent_os.execute_task("Goal", task_id="task_fail_04", conversation_context=ctx4)
+    assert not (state_dir / "task_fail_04.json").exists()
+
+    # Sub-case 5: Insert an invalid historical task ID in-place (without changing list length)
+    ctx5 = ConversationContext(
+        conversation_id="conv_neg_05",
+        workspace_root=ws,
+        prior_tasks=[task_init],
+    )
+    ctx5.prior_tasks[0] = PriorTaskReference.model_construct(
+        task_id="task_bad\n",
+        task_goal="Goal",
+        success=True,
+        final_phase=TaskPhase.COMPLETED,
+        summary="Done",
+    )
+
+    with pytest.raises((ValidationError, ValueError)):
+        await agent_os.execute_task("Goal", task_id="task_fail_05", conversation_context=ctx5)
+    assert not (state_dir / "task_fail_05.json").exists()
+
+    # Sub-case 6: Direct LeadArchitectLoop construction rejection
+    with pytest.raises((ValidationError, ValueError)):
+        LeadArchitectLoop(
+            workspace_root=ws,
+            gateway=agent_os.gateway,
+            dispatcher=agent_os.dispatcher,
+            task_id="task_loop_direct_fail",
+            task_goal="Goal",
+            conversation_context=ctx4,
+        )
+    assert not (state_dir / "task_loop_direct_fail.json").exists()
+
+    # Sub-case 7: Independence from later caller mutation
+    valid_ctx = ConversationContext(
+        conversation_id="conv_independent",
+        workspace_root=ws,
+        advisory_preferences=["Original preference"],
+    )
+    loop = LeadArchitectLoop(
+        workspace_root=ws,
+        gateway=agent_os.gateway,
+        dispatcher=agent_os.dispatcher,
+        task_id="task_iso_check",
+        task_goal="Goal",
+        conversation_context=valid_ctx,
+    )
+    # Caller mutates context object after passing it
+    valid_ctx.advisory_preferences.append("Late mutated preference")
+    assert loop.conversation_context is not None
+    assert len(loop.conversation_context.advisory_preferences) == 1
+    assert "Late mutated preference" not in loop.conversation_context.advisory_preferences

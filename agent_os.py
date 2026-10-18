@@ -47,13 +47,7 @@ class AgentOS:
     ) -> TaskOutcome:
         """Run an autonomous engineering task from diagnosis to verified completion."""
         if conversation_context is not None:
-            if (
-                len(conversation_context.prior_tasks) > 3
-                or len(conversation_context.recent_messages) > 6
-                or len(conversation_context.advisory_preferences) > 5
-            ):
-                raise ValueError("ConversationContext collection caps exceeded at trust boundary.")
-            context_snapshot = conversation_context.model_copy(deep=True)
+            context_snapshot = ConversationContext.snapshot_and_validate(conversation_context)
 
             if context_snapshot.workspace_root.resolve() != self.workspace_root.resolve():
                 raise ValueError(

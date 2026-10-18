@@ -51,13 +51,7 @@ class LeadArchitectLoop:
         self.max_rollbacks = max_rollbacks
         self.verbose = verbose
         if conversation_context is not None:
-            if (
-                len(conversation_context.prior_tasks) > 3
-                or len(conversation_context.recent_messages) > 6
-                or len(conversation_context.advisory_preferences) > 5
-            ):
-                raise ValueError("ConversationContext collection caps exceeded at trust boundary.")
-            self.conversation_context = conversation_context.model_copy(deep=True)
+            self.conversation_context = ConversationContext.snapshot_and_validate(conversation_context)
 
             if self.conversation_context.workspace_root.resolve() != self.workspace_root.resolve():
                 raise ValueError(
