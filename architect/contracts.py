@@ -1,8 +1,9 @@
 """Core data contracts for Layer 3 (L3) - The Lead Architect."""
 
+from pathlib import Path
 from enum import Enum
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from brain.schemas import PlanStep, TaskPhase
 
@@ -116,3 +117,72 @@ class TaskOutcome(BaseModel):
     total_ticks: int
     rollbacks_triggered: int
     final_checkpoint_hash: str | None = None
+
+
+# ==============================================================================
+# 3.3 Desktop Conversation Context Contracts (NCD-03 / C-01)
+# ==============================================================================
+class PriorTaskReference(BaseModel):
+    """Reference to a previously executed task from the desktop thread."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    task_id: str = Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_\-]+$")
+    task_goal: str = Field(min_length=1, max_length=500)
+    success: bool
+    final_phase: TaskPhase
+    summary: str = Field(min_length=1, max_length=1000)
+
+    @model_validator(mode="after")
+    def validate_outcome_consistency(self) -> "PriorTaskReference":
+        """Detect and reject internally contradictory outcome records."""
+        if self.success and self.final_phase != TaskPhase.COMPLETED:
+            raise ValueError(
+                f"Contradictory prior task outcome: success=True is incompatible with final_phase='{self.final_phase.value}'."
+            )
+        if not self.success and self.final_phase == TaskPhase.COMPLETED:
+            raise ValueError(
+                "Contradictory prior task outcome: success=False is incompatible with final_phase='COMPLETED'."
+            )
+        return self
+
+
+class HistoricalMessage(BaseModel):
+    """Historical chat message from the desktop thread."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=1000)
+
+
+class ConversationContext(BaseModel):
+    """Structured, bounded conversation context passed from the desktop supervisor."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal[1] = 1
+    conversation_id: str = Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_\-]+$")
+    workspace_root: Path
+    prior_tasks: list[PriorTaskReference] = Field(default_factory=list, max_length=3)
+    recent_messages: list[HistoricalMessage] = Field(default_factory=list, max_length=6)
+    advisory_preferences: list[str] = Field(default_factory=list, max_length=5)
+
+    @field_validator("workspace_root")
+    @classmethod
+    def validate_workspace_root_metadata(cls, v: Path | str) -> Path:
+        p = Path(v)
+        path_str = str(p)
+        if not (1 <= len(path_str) <= 1024):
+            raise ValueError("workspace_root path length must be between 1 and 1024 characters.")
+        if "\0" in path_str:
+            raise ValueError("workspace_root path cannot contain null bytes.")
+        return p
+
+    @field_validator("advisory_preferences")
+    @classmethod
+    def validate_advisory_preferences(cls, v: list[str]) -> list[str]:
+        for pref in v:
+            if not (1 <= len(pref) <= 200):
+                raise ValueError("Each advisory preference must be between 1 and 200 characters.")
+        return v

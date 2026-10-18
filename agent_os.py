@@ -1,9 +1,8 @@
-"""Top-level AgentOS facade unifying Layer 1, Layer 2, Layer 3, and Layer 4."""
-
+import re
 import uuid
 from pathlib import Path
 
-from architect.contracts import TaskOutcome
+from architect.contracts import ConversationContext, TaskOutcome
 from architect.lead_loop import LeadArchitectLoop
 from brain.repo_graph import RepoGraph
 from kernel.config import KernelConfig
@@ -43,9 +42,61 @@ class AgentOS:
         self,
         task_goal: str,
         task_id: str | None = None,
+        *,
+        conversation_context: ConversationContext | None = None,
     ) -> TaskOutcome:
         """Run an autonomous engineering task from diagnosis to verified completion."""
-        tid = task_id or f"task_{uuid.uuid4().hex[:8]}"
+        if conversation_context is not None:
+            if (
+                len(conversation_context.prior_tasks) > 3
+                or len(conversation_context.recent_messages) > 6
+                or len(conversation_context.advisory_preferences) > 5
+            ):
+                raise ValueError("ConversationContext collection caps exceeded at trust boundary.")
+            context_snapshot = conversation_context.model_copy(deep=True)
+
+            if context_snapshot.workspace_root.resolve() != self.workspace_root.resolve():
+                raise ValueError(
+                    f"ConversationContext workspace_root ({context_snapshot.workspace_root.resolve()}) "
+                    f"does not match AgentOS workspace_root ({self.workspace_root.resolve()})."
+                )
+            if task_id is not None:
+                if (
+                    not isinstance(task_id, str)
+                    or not (1 <= len(task_id) <= 64)
+                    or not re.fullmatch(r"[a-zA-Z0-9_\-]+", task_id, flags=re.ASCII)
+                ):
+                    raise ValueError(
+                        f"Invalid task_id format: '{task_id}'. Must be 1-64 ASCII alphanumeric, hyphen, or underscore characters without path separators or trailing newlines."
+                    )
+                if task_id == context_snapshot.conversation_id:
+                    raise ValueError(
+                        f"task_id '{task_id}' must be distinct from conversation_id '{context_snapshot.conversation_id}'."
+                    )
+                for prior in context_snapshot.prior_tasks:
+                    if task_id == prior.task_id:
+                        raise ValueError(
+                            f"task_id '{task_id}' collides with prior task_id '{prior.task_id}'."
+                        )
+                state_file = self.workspace_root / ".agent_os" / "state" / f"{task_id}.json"
+                if state_file.exists():
+                    raise ValueError(
+                        f"Pre-existing state file already exists for task_id '{task_id}': {state_file}"
+                    )
+                tid = task_id
+            else:
+                forbidden_ids = {context_snapshot.conversation_id}
+                forbidden_ids.update(t.task_id for t in context_snapshot.prior_tasks)
+                while True:
+                    candidate = f"task_{uuid.uuid4().hex[:8]}"
+                    candidate_file = self.workspace_root / ".agent_os" / "state" / f"{candidate}.json"
+                    if candidate not in forbidden_ids and not candidate_file.exists():
+                        tid = candidate
+                        break
+        else:
+            context_snapshot = None
+            tid = task_id or f"task_{uuid.uuid4().hex[:8]}"
+
         loop = LeadArchitectLoop(
             workspace_root=self.workspace_root,
             gateway=self.gateway,
@@ -55,5 +106,6 @@ class AgentOS:
             max_ticks=self.max_ticks,
             max_rollbacks=self.max_rollbacks,
             verbose=self.verbose,
+            conversation_context=context_snapshot,
         )
         return await loop.run()

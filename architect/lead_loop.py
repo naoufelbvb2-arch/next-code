@@ -1,10 +1,12 @@
 """LeadArchitectLoop state machine and deterministic safety gate orchestration engine."""
 
+import re
 from pathlib import Path
 
 from architect.contracts import (
     ArchitectAction,
     ArchitectDecision,
+    ConversationContext,
     InquisitorVerdict,
     TaskContract,
     TaskOutcome,
@@ -38,6 +40,7 @@ class LeadArchitectLoop:
         max_ticks: int = 15,
         max_rollbacks: int = 4,
         verbose: bool = False,
+        conversation_context: ConversationContext | None = None,
     ) -> None:
         self.workspace_root = workspace_root.resolve()
         self.gateway = gateway
@@ -47,6 +50,44 @@ class LeadArchitectLoop:
         self.max_ticks = max_ticks
         self.max_rollbacks = max_rollbacks
         self.verbose = verbose
+        if conversation_context is not None:
+            if (
+                len(conversation_context.prior_tasks) > 3
+                or len(conversation_context.recent_messages) > 6
+                or len(conversation_context.advisory_preferences) > 5
+            ):
+                raise ValueError("ConversationContext collection caps exceeded at trust boundary.")
+            self.conversation_context = conversation_context.model_copy(deep=True)
+
+            if self.conversation_context.workspace_root.resolve() != self.workspace_root.resolve():
+                raise ValueError(
+                    f"ConversationContext workspace_root ({self.conversation_context.workspace_root.resolve()}) "
+                    f"does not match LeadArchitectLoop workspace_root ({self.workspace_root.resolve()})."
+                )
+            if (
+                not isinstance(self.task_id, str)
+                or not (1 <= len(self.task_id) <= 64)
+                or not re.fullmatch(r"[a-zA-Z0-9_\-]+", self.task_id, flags=re.ASCII)
+            ):
+                raise ValueError(
+                    f"Invalid task_id format: '{self.task_id}'. Must be 1-64 ASCII alphanumeric, hyphen, or underscore characters without path separators or trailing newlines."
+                )
+            if self.task_id == self.conversation_context.conversation_id:
+                raise ValueError(
+                    f"New task_id '{self.task_id}' must be distinct from conversation_id '{self.conversation_context.conversation_id}'."
+                )
+            for prior in self.conversation_context.prior_tasks:
+                if self.task_id == prior.task_id:
+                    raise ValueError(
+                        f"New task_id '{self.task_id}' collides with prior task_id '{prior.task_id}'."
+                    )
+            state_file = self.workspace_root / ".agent_os" / "state" / f"{self.task_id}.json"
+            if state_file.exists():
+                raise ValueError(
+                    f"Pre-existing state file already exists for task_id '{self.task_id}': {state_file}"
+                )
+        else:
+            self.conversation_context = None
 
         # Layer 2 Components
         self.repo_graph = RepoGraph(self.workspace_root)
@@ -141,6 +182,7 @@ class LeadArchitectLoop:
                 gate_warning=self.gate_warning,
                 tick_number=tick,
                 max_ticks=self.max_ticks,
+                conversation_context=self.conversation_context,
             )
 
             # Clear gate warning after presenting it
