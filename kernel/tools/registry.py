@@ -3,6 +3,7 @@
 import time
 from typing import Any, Callable
 
+from kernel.execution import TaskCancelled, CleanupUnverified, check_cancelled
 from kernel.schemas import ExecutionContext, ToolResult
 from kernel.tools.filesystem import apply_patch, list_dir, read_file
 from kernel.tools.search import find_files, grep_search
@@ -43,6 +44,7 @@ class ToolRegistry:
         **kwargs: Any,
     ) -> ToolResult:
         """Dispatch execution to the registered tool with deterministic error capture."""
+        check_cancelled()
         tool_fn = self.get_tool(name)
         if not tool_fn:
             return ToolResult(
@@ -55,6 +57,8 @@ class ToolRegistry:
         start = time.perf_counter()
         try:
             return tool_fn(ctx, **kwargs)
+        except (TaskCancelled, CleanupUnverified):
+            raise
         except Exception as e:
             return ToolResult(
                 success=False,

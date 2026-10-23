@@ -22,6 +22,7 @@ from brain.blackboard import Blackboard
 from brain.playbooks import PlaybookStore
 from brain.repo_graph import RepoGraph
 from brain.schemas import StepStatus, TaskPhase
+from kernel.execution import binding, check_cancelled, gateway_wait
 from kernel.checkpoint import GitShadowCheckpointer
 from kernel.gateway.router import ModelGateway
 from kernel.schemas import AgentRole, ExecutionContext, Message, ModelProfile
@@ -123,6 +124,11 @@ class LeadArchitectLoop:
 
     async def run(self) -> TaskOutcome:
         """Run the Lead Architect orchestration cycle until task completion, abortion, or limits."""
+        check_cancelled()
+        observer = binding.get().observer
+        if observer is not None:
+            observer.started(self.task_id, self.workspace_root)
+        check_cancelled()
         # 1. Initial world model refresh and baseline checkpoint
         self.repo_graph.refresh()
         base_checkpoint = self.checkpointer.create_checkpoint("task_baseline")
@@ -134,6 +140,7 @@ class LeadArchitectLoop:
 
         # 3. Main orchestration tick loop
         for tick in range(1, self.max_ticks + 1):
+            check_cancelled()
             # Abort if rollbacks exceed budget
             if self.rollbacks_triggered >= self.max_rollbacks:
                 self.blackboard.set_phase(TaskPhase.FAILED)
@@ -188,12 +195,13 @@ class LeadArchitectLoop:
                 Message(role="user", content=tick_prompt),
             ]
 
-            decision, _ = await self.gateway.generate_structured(
+            check_cancelled()
+            decision, _ = await gateway_wait(self.gateway.generate_structured(
                 profile=ModelProfile.REASONING,
                 messages=messages,
                 response_model=ArchitectDecision,
                 task_id=self.task_id,
-            )
+            ))
 
             if self.verbose:
                 print(f"\n[Architect Tick {tick}/{self.max_ticks}] Phase: {decision.new_phase.value} | Action: {decision.next_action.value}")
@@ -290,6 +298,7 @@ class LeadArchitectLoop:
             else:
                 role = AgentRole.SCOUT
 
+            check_cancelled()
             # Gate 2: Mandatory Pre-Surgery Shadow Checkpoint
             if role == AgentRole.SURGEON:
                 cp_hash = self.checkpointer.create_checkpoint(f"pre_surgery_tick_{tick}")
@@ -329,6 +338,7 @@ class LeadArchitectLoop:
             assert decision.task_contract is not None
             if self.verbose:
                 print(f"  -> Dispatched ephemeral {role.value} worker...")
+            check_cancelled()
             report = await self.dispatcher.dispatch(
                 contract=decision.task_contract,
                 ctx=ctx,

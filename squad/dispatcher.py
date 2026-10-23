@@ -4,6 +4,7 @@ from pathlib import Path
 
 from architect.contracts import TaskContract, WorkerReport
 from brain.repo_graph import RepoGraph
+from kernel.execution import check_cancelled
 from kernel.gateway.router import ModelGateway
 from kernel.schemas import ExecutionContext
 from kernel.tools.registry import ToolRegistry
@@ -34,6 +35,7 @@ class EphemeralSquadDispatcher:
         git_diff: str = "",
     ) -> WorkerReport:
         """Spawn an ephemeral worker, execute the contract, verify memory wipe, and return the report."""
+        check_cancelled()
         # 1. Refresh repository AST graph and compile target skeletons
         self.repo_graph.refresh()
         target_file_skeletons: dict[str, str] = {}
@@ -51,6 +53,7 @@ class EphemeralSquadDispatcher:
         )
 
         # 4. Spawn clean ephemeral chassis
+        check_cancelled()
         chassis = StandardAgentChassis(
             role_card=role_card,
             context_pkg=context_pkg,

@@ -7,6 +7,7 @@ from architect.contracts import (
     WorkerReport,
     WorkerStatus,
 )
+from kernel.execution import check_cancelled, gateway_wait, tool_wait
 from kernel.gateway.router import ModelGateway
 from kernel.schemas import ExecutionContext, Message, PatchBlock, ToolResult
 from kernel.tools.registry import ToolRegistry
@@ -50,6 +51,7 @@ class StandardAgentChassis:
 
     def _on_tool_call(self, tool_call: ToolCallSpec) -> ToolResult:
         """Lifecycle Hook 2: Physically enforce RoleCard tool whitelist before Layer 1 execution."""
+        check_cancelled()
         # 1. Physical Tool Whitelisting Gate
         if tool_call.tool_name not in self.role_card.tools_whitelist:
             return ToolResult(
@@ -207,9 +209,11 @@ Step {step} of {self.role_card.max_steps} maximum steps.
 
     async def execute(self) -> WorkerReport:
         """Execute the bounded ReAct loop until task completion, step exhaustion, or failure."""
+        check_cancelled()
         self._on_spawn()
         try:
             for step in range(1, self.role_card.max_steps + 1):
+                check_cancelled()
                 system_prompt = self._build_system_prompt()
                 user_prompt = self._build_user_prompt(step=step)
 
@@ -218,12 +222,12 @@ Step {step} of {self.role_card.max_steps} maximum steps.
                     Message(role="user", content=user_prompt),
                 ]
 
-                decision, _ = await self.gateway.generate_structured(
+                decision, _ = await gateway_wait(self.gateway.generate_structured(
                     profile=self.role_card.model_profile,
                     messages=messages,
                     response_model=ChassisStepDecision,
                     task_id=self.ctx.task_id,
-                )
+                ))
 
                 # Persist scratchpad note if present
                 if decision.scratchpad_note:
@@ -242,7 +246,7 @@ Step {step} of {self.role_card.max_steps} maximum steps.
                             tool_name="run_command",
                             arguments={"command": self.context_pkg.contract.test_command},
                         )
-                        res = self._on_tool_call(auto_call)
+                        res = await tool_wait(self._on_tool_call, auto_call)
                         self.memory.record_interaction(
                             step_number=step,
                             thought="[AUTO-PRE-FINISH-HOOK] Mandatory test execution intercepted before task completion.",
@@ -272,7 +276,7 @@ Step {step} of {self.role_card.max_steps} maximum steps.
                         )
                         continue
 
-                    res = self._on_tool_call(decision.tool_call)
+                    res = await tool_wait(self._on_tool_call, decision.tool_call)
                     self.memory.record_interaction(
                         step_number=step,
                         thought=decision.thought,

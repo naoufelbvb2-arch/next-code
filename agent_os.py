@@ -5,6 +5,8 @@ from pathlib import Path
 from architect.contracts import ConversationContext, TaskOutcome
 from architect.lead_loop import LeadArchitectLoop
 from brain.repo_graph import RepoGraph
+from kernel.execution import (CancellationControl, ExecutionObserver, ExecutionBinding,
+                              TaskCancelled, binding, check_cancelled)
 from kernel.config import KernelConfig
 from kernel.gateway.router import ModelGateway
 from kernel.tools.registry import ToolRegistry
@@ -44,6 +46,8 @@ class AgentOS:
         task_id: str | None = None,
         *,
         conversation_context: ConversationContext | None = None,
+        observer: ExecutionObserver | None = None,
+        cancellation: CancellationControl | None = None,
     ) -> TaskOutcome:
         """Run an autonomous engineering task from diagnosis to verified completion."""
         if conversation_context is not None:
@@ -91,15 +95,31 @@ class AgentOS:
             context_snapshot = None
             tid = task_id or f"task_{uuid.uuid4().hex[:8]}"
 
-        loop = LeadArchitectLoop(
-            workspace_root=self.workspace_root,
-            gateway=self.gateway,
-            dispatcher=self.dispatcher,
-            task_id=tid,
-            task_goal=task_goal,
-            max_ticks=self.max_ticks,
-            max_rollbacks=self.max_rollbacks,
-            verbose=self.verbose,
-            conversation_context=context_snapshot,
-        )
-        return await loop.run()
+        token = binding.set(ExecutionBinding(cancellation, observer))
+        try:
+            check_cancelled()
+            loop = LeadArchitectLoop(
+                workspace_root=self.workspace_root,
+                gateway=self.gateway,
+                dispatcher=self.dispatcher,
+                task_id=tid,
+                task_goal=task_goal,
+                max_ticks=self.max_ticks,
+                max_rollbacks=self.max_rollbacks,
+                verbose=self.verbose,
+                conversation_context=context_snapshot,
+            )
+            outcome = await loop.run()
+            if observer is not None:
+                observer.outcome(outcome)
+            return outcome
+        except TaskCancelled:
+            if observer is not None:
+                observer.cancelled(tid, self.workspace_root)
+            raise
+        except BaseException as error:
+            if observer is not None:
+                observer.failed(tid, self.workspace_root, error)
+            raise
+        finally:
+            binding.reset(token)

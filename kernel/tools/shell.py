@@ -7,6 +7,7 @@ import sys
 import time
 from typing import Any
 
+from kernel.execution import binding, check_cancelled, TaskCancelled, CleanupUnverified
 from kernel.exceptions import PermissionDeniedError, SecurityViolationError
 from kernel.guard import WorkspaceGuard
 from kernel.schemas import ExecutionContext, ToolResult
@@ -74,6 +75,8 @@ def run_command(
 ) -> ToolResult:
     """Execute shell command inside an isolated OS process group with strict timeouts and smart output truncation."""
     start_time = time.perf_counter()
+    control = binding.get().control
+    check_cancelled()
     target_cwd = cwd if cwd is not None else cwd_rel
     timeout = timeout_sec if timeout_sec is not None else ctx.command_timeout_sec
 
@@ -96,10 +99,43 @@ def run_command(
         else:
             popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
 
-        proc = subprocess.Popen(command, **popen_kwargs)
+        check_cancelled()
+        job = None
+        if control is not None and sys.platform == "win32":
+            from kernel.owned_process import WindowsToolJob
+            job = WindowsToolJob()
+            popen_kwargs["creationflags"] |= 0x4  # CREATE_SUSPENDED before Job assignment
+        try:
+            proc = subprocess.Popen(command, **popen_kwargs)
+            if job is not None:
+                try:
+                    job.assign_and_resume(proc)
+                except BaseException:
+                    proc.kill()
+                    proc.wait(timeout=5)
+                    raise
+        except BaseException:
+            if job is not None:
+                job.stop_and_verify()
+            raise
 
         try:
-            stdout_bytes, stderr_bytes = proc.communicate(timeout=timeout)
+            if control is None:
+                stdout_bytes, stderr_bytes = proc.communicate(timeout=timeout)
+            else:
+                deadline = time.monotonic() + timeout
+                while True:
+                    control.check()
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise subprocess.TimeoutExpired(command, timeout)
+                    try:
+                        stdout_bytes, stderr_bytes = proc.communicate(timeout=min(0.05, remaining))
+                        break
+                    except subprocess.TimeoutExpired:
+                        if time.monotonic() >= deadline:
+                            raise
+                control.check()
             elapsed_ms = (time.perf_counter() - start_time) * 1000
 
             stdout_str = stdout_bytes.decode("utf-8", errors="replace").strip()
@@ -127,8 +163,18 @@ def run_command(
                 },
             )
 
+        except TaskCancelled:
+            if job is not None:
+                job.stop_and_verify()
+            else:
+                _kill_process_tree(proc)
+            proc.communicate(timeout=5)
+            raise
         except subprocess.TimeoutExpired:
-            _kill_process_tree(proc)
+            if job is not None:
+                job.stop_and_verify()
+            else:
+                _kill_process_tree(proc)
             partial_stdout, partial_stderr = proc.communicate()
             elapsed_ms = (time.perf_counter() - start_time) * 1000
 
@@ -155,6 +201,12 @@ def run_command(
                 metadata={"timeout_sec": ctx.command_timeout_sec, "pid": proc.pid},
             )
 
+        finally:
+            if job is not None:
+                job.stop_and_verify()
+
+    except (TaskCancelled, CleanupUnverified):
+        raise
     except SecurityViolationError as e:
         return ToolResult(
             success=False,

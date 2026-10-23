@@ -1,0 +1,343 @@
+{
+  "baseline": "834d0ca62cc9b2c03e530bafe4090024d98f31d3",
+  "branch": "feature/p7-desktop-lifecycle-control",
+  "platform": "actual Windows x64 CPython 3.14.4",
+  "engine": "actual AgentOS with offline Gateway",
+  "passed": 53,
+  "skippedPaidLive": 3,
+  "failed": 0,
+  "cases": [
+    {
+      "name": "test_independent_prechange_golden_oracle",
+      "class": "tests.test_conversation_context",
+      "status": "PASS"
+    },
+    {
+      "name": "test_f01_safe_task_id_full_string_verification",
+      "class": "tests.test_conversation_context",
+      "status": "PASS"
+    },
+    {
+      "name": "test_f02_unicode_separators_and_sanitization",
+      "class": "tests.test_conversation_context",
+      "status": "PASS"
+    },
+    {
+      "name": "test_h01_defensive_collection_cap_enforcement",
+      "class": "tests.test_conversation_context",
+      "status": "PASS"
+    },
+    {
+      "name": "test_h02_contradictory_prior_outcomes",
+      "class": "tests.test_conversation_context",
+      "status": "PASS"
+    },
+    {
+      "name": "test_h03_workspace_root_metadata_bounds",
+      "class": "tests.test_conversation_context",
+      "status": "PASS"
+    },
+    {
+      "name": "test_two_task_agent_os_execution_and_gate3_rollback",
+      "class": "tests.test_conversation_context",
+      "status": "PASS"
+    },
+    {
+      "name": "test_manual_checkpointer_rollback_supplementary",
+      "class": "tests.test_conversation_context",
+      "status": "PASS"
+    },
+    {
+      "name": "test_failed_historical_status_in_prompt_and_no_fact_seeding",
+      "class": "tests.test_conversation_context",
+      "status": "PASS"
+    },
+    {
+      "name": "test_full_record_preservation_with_explicit_parsing",
+      "class": "tests.test_conversation_context",
+      "status": "PASS"
+    },
+    {
+      "name": "test_strengthened_playbook_immunity_spied",
+      "class": "tests.test_conversation_context",
+      "status": "PASS"
+    },
+    {
+      "name": "test_r02_f02_boundary_revalidation_and_post_instantiation_mutations",
+      "class": "tests.test_conversation_context",
+      "status": "PASS"
+    },
+    {
+      "name": "test_real_lifecycle_outcome_and_old_call[False]",
+      "class": "tests.test_execution_control",
+      "status": "PASS"
+    },
+    {
+      "name": "test_real_lifecycle_outcome_and_old_call[True]",
+      "class": "tests.test_execution_control",
+      "status": "PASS"
+    },
+    {
+      "name": "test_actual_failed_outcome_and_late_cancel[ABORT_TASK]",
+      "class": "tests.test_execution_control",
+      "status": "PASS"
+    },
+    {
+      "name": "test_actual_failed_outcome_and_late_cancel[COMPLETE_TASK]",
+      "class": "tests.test_execution_control",
+      "status": "PASS"
+    },
+    {
+      "name": "test_precancel_does_not_start_or_write",
+      "class": "tests.test_execution_control",
+      "status": "PASS"
+    },
+    {
+      "name": "test_gateway_and_worker_cancel_drains_before_confirmation[False]",
+      "class": "tests.test_execution_control",
+      "status": "PASS"
+    },
+    {
+      "name": "test_gateway_and_worker_cancel_drains_before_confirmation[True]",
+      "class": "tests.test_execution_control",
+      "status": "PASS"
+    },
+    {
+      "name": "test_exception_has_no_invented_task_outcome",
+      "class": "tests.test_execution_control",
+      "status": "PASS"
+    },
+    {
+      "name": "test_blocking_tool_is_drained_and_no_next_tool_starts",
+      "class": "tests.test_execution_control",
+      "status": "PASS"
+    },
+    {
+      "name": "test_shell_cancel_stops_owned_child_and_descendant",
+      "class": "tests.test_execution_control",
+      "status": "PASS"
+    },
+    {
+      "name": "test_cleanup_failure_cannot_be_cooperative_confirmation",
+      "class": "tests.test_execution_control",
+      "status": "PASS"
+    },
+    {
+      "name": "test_real_coding_patch_verification_context_and_terminal_race",
+      "class": "tests.test_execution_control",
+      "status": "PASS"
+    },
+    {
+      "name": "test_tool_failure_does_not_invent_success",
+      "class": "tests.test_execution_control",
+      "status": "PASS"
+    },
+    {
+      "name": "test_cancellation_preserves_already_written_files",
+      "class": "tests.test_execution_control",
+      "status": "PASS"
+    },
+    {
+      "name": "test_path_escape_and_symlink_jail",
+      "class": "tests.test_l1_kernel",
+      "status": "PASS"
+    },
+    {
+      "name": "test_rbac_enforcement",
+      "class": "tests.test_l1_kernel",
+      "status": "PASS"
+    },
+    {
+      "name": "test_syntax_gated_patching",
+      "class": "tests.test_l1_kernel",
+      "status": "PASS"
+    },
+    {
+      "name": "test_shadow_checkpointing_and_dirty_tree_rollback",
+      "class": "tests.test_l1_kernel",
+      "status": "PASS"
+    },
+    {
+      "name": "test_process_group_timeout_and_truncation",
+      "class": "tests.test_l1_kernel",
+      "status": "PASS"
+    },
+    {
+      "name": "test_model_gateway_and_structured_validation",
+      "class": "tests.test_l1_kernel",
+      "status": "PASS"
+    },
+    {
+      "name": "test_live_deepseek_api_integration",
+      "class": "tests.test_l1_kernel",
+      "status": "SKIPPED"
+    },
+    {
+      "name": "test_filesystem_edge_cases",
+      "class": "tests.test_l1_kernel",
+      "status": "PASS"
+    },
+    {
+      "name": "test_search_tools",
+      "class": "tests.test_l1_kernel",
+      "status": "PASS"
+    },
+    {
+      "name": "test_tool_registry",
+      "class": "tests.test_l1_kernel",
+      "status": "PASS"
+    },
+    {
+      "name": "test_agent_os_security_and_rollback_immunity",
+      "class": "tests.test_l2_brain",
+      "status": "PASS"
+    },
+    {
+      "name": "test_ast_parsing_and_dependency_resolution",
+      "class": "tests.test_l2_brain",
+      "status": "PASS"
+    },
+    {
+      "name": "test_incremental_caching_performance",
+      "class": "tests.test_l2_brain",
+      "status": "PASS"
+    },
+    {
+      "name": "test_impact_radius_calculation",
+      "class": "tests.test_l2_brain",
+      "status": "PASS"
+    },
+    {
+      "name": "test_blackboard_persistence_recovery_and_graveyard",
+      "class": "tests.test_l2_brain",
+      "status": "PASS"
+    },
+    {
+      "name": "test_playbook_seeding_persistence_and_matching",
+      "class": "tests.test_l2_brain",
+      "status": "PASS"
+    },
+    {
+      "name": "test_rename_rollback_cleanup_polish",
+      "class": "tests.test_l3_architect",
+      "status": "PASS"
+    },
+    {
+      "name": "test_happy_path_orchestration_cycle",
+      "class": "tests.test_l3_architect",
+      "status": "PASS"
+    },
+    {
+      "name": "test_gate_4_premature_completion_blocked",
+      "class": "tests.test_l3_architect",
+      "status": "PASS"
+    },
+    {
+      "name": "test_gate_3_surgeon_failure_auto_rollback",
+      "class": "tests.test_l3_architect",
+      "status": "PASS"
+    },
+    {
+      "name": "test_gate_3_inquisitor_rejection_auto_rollback",
+      "class": "tests.test_l3_architect",
+      "status": "PASS"
+    },
+    {
+      "name": "test_gate_1_and_max_rollbacks_abort",
+      "class": "tests.test_l3_architect",
+      "status": "PASS"
+    },
+    {
+      "name": "test_live_deepseek_architect_reasoning",
+      "class": "tests.test_l3_architect",
+      "status": "SKIPPED"
+    },
+    {
+      "name": "test_chassis_physical_tool_whitelist_enforcement",
+      "class": "tests.test_l4_squad",
+      "status": "PASS"
+    },
+    {
+      "name": "test_sliding_window_memory_compression_and_ephemeral_destruction",
+      "class": "tests.test_l4_squad",
+      "status": "PASS"
+    },
+    {
+      "name": "test_mandatory_test_execution_hook_and_truthful_modified_files_ledger",
+      "class": "tests.test_l4_squad",
+      "status": "PASS"
+    },
+    {
+      "name": "test_step_budget_exhaustion_handling",
+      "class": "tests.test_l4_squad",
+      "status": "PASS"
+    },
+    {
+      "name": "test_end_to_end_autonomous_bugfix_cycle",
+      "class": "tests.test_l4_squad",
+      "status": "PASS"
+    },
+    {
+      "name": "test_live_deepseek_ephemeral_worker_execution",
+      "class": "tests.test_l4_squad",
+      "status": "SKIPPED"
+    },
+    {
+      "name": "test_chassis_tool_signature_alignment",
+      "class": "tests.test_l4_squad",
+      "status": "PASS"
+    }
+  ],
+  "files": {
+    ".gitignore": {
+      "bytes": 439,
+      "sha256": "8ac52fd232b3b4a114e9bf3b686186fe24d42cebadc154b1fd4e8582d0d1c688"
+    },
+    "agent_os.py": {
+      "bytes": 5412,
+      "sha256": "084f891d2135c1c53ecca30df4a4a25a4e927bcf48d18fbc807a63ae3509c47d"
+    },
+    "architect/lead_loop.py": {
+      "bytes": 18842,
+      "sha256": "c376eb276d6fbaf20c4ef588e6898f9d0a6f2b075ac0d1ceafecc06cb076809d"
+    },
+    "squad/dispatcher.py": {
+      "bytes": 2585,
+      "sha256": "aca5c9e9eae1fb0cf29f017b85d3b1a103789842216c0f1514d835aaa54d5b4d"
+    },
+    "squad/chassis.py": {
+      "bytes": 12661,
+      "sha256": "05c05bf7256b5aa1b7c009b86f0c3a557766ab44ce3c664804c57897acee50bd"
+    },
+    "kernel/tools/registry.py": {
+      "bytes": 2465,
+      "sha256": "24f2e7106bcbc43d73e3b79328b0f3fffb6e04411913cb03748679ce85489b7b"
+    },
+    "kernel/tools/shell.py": {
+      "bytes": 8107,
+      "sha256": "2a5ae91831e37d17baf559998c6e3c1a5fa8c39b27aa0812e851558ce2abf215"
+    },
+    "kernel/execution.py": {
+      "bytes": 3207,
+      "sha256": "801f3cdb4c73d014c189d13dcd9efdd70127a939b27f65dfba05953233d7ffd5"
+    },
+    "kernel/owned_process.py": {
+      "bytes": 3589,
+      "sha256": "bfae87e1df5bc0bd284050d6cc3e455afe324766f8c2c71e8662e733cfcd9166"
+    },
+    "tests/test_execution_control.py": {
+      "bytes": 13963,
+      "sha256": "0943e4eba24aad3cb66ae12981ceeba25c287feceff16a262e037509ed995105"
+    },
+    "tests/run_offline.py": {
+      "bytes": 1462,
+      "sha256": "107af6edcfb7bea2e45b09e73951a040fdb08bfa14d6927d4c9ea90e5e5a464a"
+    },
+    "requirements-p7-test.lock": {
+      "bytes": 415,
+      "sha256": "3c558a55f6397c730858e81afa258195a02e438fec27d68ab181e36c4e88c83c"
+    }
+  },
+  "paidRequestsMade": 0,
+  "desktopIntegration": "NOT_RUN_IN_ENGINE_SUITE"
+}

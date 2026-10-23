@@ -28,3 +28,6 @@ demo_sandbox/
 *.pem
 *.secret
 secrets/
+
+# Local P7 verification environment
+.venv/
