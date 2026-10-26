@@ -22,7 +22,7 @@ from brain.blackboard import Blackboard
 from brain.playbooks import PlaybookStore
 from brain.repo_graph import RepoGraph
 from brain.schemas import StepStatus, TaskPhase
-from kernel.execution import binding, check_cancelled, gateway_wait
+from kernel.execution import binding, check_cancelled, gateway_wait, observe_optional
 from kernel.checkpoint import GitShadowCheckpointer
 from kernel.gateway.router import ModelGateway
 from kernel.schemas import AgentRole, ExecutionContext, Message, ModelProfile
@@ -122,6 +122,14 @@ class LeadArchitectLoop:
             cp_short = self.last_pre_surgery_checkpoint[:8] if self.last_pre_surgery_checkpoint else "initial"
             print(f"  [Gate 3 Auto-Rollback] Workspace restored to {cp_short}. Reason: {reason}")
 
+    def _set_phase(self, phase: TaskPhase) -> None:
+        check_cancelled()
+        previous = self.blackboard.state.phase
+        self.blackboard.set_phase(phase)
+        if previous != phase:
+            observe_optional("phase_changed", self.task_id, phase)
+        check_cancelled()
+
     async def run(self) -> TaskOutcome:
         """Run the Lead Architect orchestration cycle until task completion, abortion, or limits."""
         check_cancelled()
@@ -143,7 +151,7 @@ class LeadArchitectLoop:
             check_cancelled()
             # Abort if rollbacks exceed budget
             if self.rollbacks_triggered >= self.max_rollbacks:
-                self.blackboard.set_phase(TaskPhase.FAILED)
+                self._set_phase(TaskPhase.FAILED)
                 return TaskOutcome(
                     task_id=self.task_id,
                     success=False,
@@ -211,7 +219,6 @@ class LeadArchitectLoop:
                     print(f"  Contract: [{decision.task_contract.target_role}] {decision.task_contract.objective}")
 
             # Apply updates to Blackboard
-            self.blackboard.set_phase(decision.new_phase)
             if decision.updated_plan_steps:
                 self.blackboard.set_plan(decision.updated_plan_steps)
             for fact_in in decision.new_facts_to_record:
@@ -228,6 +235,7 @@ class LeadArchitectLoop:
                 decision.next_action == ArchitectAction.COMPLETE_TASK
                 and self.unverified_mutation_pending
             ):
+                decision.new_phase = TaskPhase.VERIFYING
                 decision.next_action = ArchitectAction.DISPATCH_INQUISITOR
                 target_files = list(self.last_surgery_files)
                 decision.task_contract = TaskContract(
@@ -250,7 +258,7 @@ class LeadArchitectLoop:
             if decision.next_action == ArchitectAction.COMPLETE_TASK:
                 if self.verbose:
                     print(f"\n[Architect Complete] {decision.final_response or 'Task completed successfully.'}")
-                self.blackboard.set_phase(TaskPhase.COMPLETED)
+                self._set_phase(TaskPhase.COMPLETED)
                 return TaskOutcome(
                     task_id=self.task_id,
                     success=True,
@@ -262,7 +270,7 @@ class LeadArchitectLoop:
                 )
 
             if decision.next_action == ArchitectAction.ABORT_TASK:
-                self.blackboard.set_phase(TaskPhase.FAILED)
+                self._set_phase(TaskPhase.FAILED)
                 return TaskOutcome(
                     task_id=self.task_id,
                     success=False,
@@ -287,6 +295,12 @@ class LeadArchitectLoop:
                         f"Tick {tick}: Gate 1 Violation (No Blind Surgery). Blocked surgeon dispatch."
                     )
                     continue
+
+            # Only an accepted, nonterminal worker decision can persist its
+            # proposed phase. Rejected Gate 1/4 suggestions are not evidence.
+            if decision.new_phase in (TaskPhase.COMPLETED, TaskPhase.FAILED):
+                raise ValueError("Nonterminal dispatch proposed a terminal phase.")
+            self._set_phase(decision.new_phase)
 
             # Map action to worker role
             if decision.next_action == ArchitectAction.DISPATCH_SCOUT:
@@ -403,7 +417,7 @@ class LeadArchitectLoop:
                     self.unverified_mutation_pending = False
 
         # Max ticks exhausted
-        self.blackboard.set_phase(TaskPhase.FAILED)
+        self._set_phase(TaskPhase.FAILED)
         return TaskOutcome(
             task_id=self.task_id,
             success=False,

@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 
 EXECUTION_CONTROL_VERSION = 1
+VERIFIED_OBSERVER_VERSION = 1
 
 
 class TaskCancelled(Exception):
@@ -55,6 +56,17 @@ class ExecutionBinding:
 
 
 binding: ContextVar[ExecutionBinding] = ContextVar("agent_os_execution", default=ExecutionBinding())
+
+
+def observe_optional(method: str, *args) -> None:
+    """Task-local additive hooks; legacy four-method observers remain valid.
+
+    Callback exceptions propagate at an awaited, quiescent boundary. They must
+    never be swallowed into invented completion evidence.
+    """
+    callback = getattr(binding.get().observer, method, None)
+    if callback is not None:
+        callback(*args)
 
 
 def check_cancelled():

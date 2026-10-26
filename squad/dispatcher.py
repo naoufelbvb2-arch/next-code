@@ -1,10 +1,11 @@
 """EphemeralSquadDispatcher implementing L3 WorkerDispatcher protocol."""
 
 from pathlib import Path
+from uuid import uuid4
 
 from architect.contracts import TaskContract, WorkerReport
 from brain.repo_graph import RepoGraph
-from kernel.execution import check_cancelled
+from kernel.execution import check_cancelled, observe_optional, CleanupUnverified
 from kernel.gateway.router import ModelGateway
 from kernel.schemas import ExecutionContext
 from kernel.tools.registry import ToolRegistry
@@ -45,6 +46,9 @@ class EphemeralSquadDispatcher:
         # 2. Select configured RoleCard
         role_card = get_role_card(contract.target_role)
 
+        if ctx.role.value != contract.target_role:
+            raise ValueError("Worker role does not match its execution context.")
+
         # 3. Assemble surgical ContextPackage
         context_pkg = ContextPackage(
             contract=contract,
@@ -62,7 +66,12 @@ class EphemeralSquadDispatcher:
             tool_registry=self.tool_registry,
         )
 
-        # 5. Await execution
+        # Identity belongs to this actual invocation, never to a model contract.
+        worker_ref = uuid4().hex
+        check_cancelled()
+        observe_optional("worker_started", ctx.task_id, worker_ref, ctx.role)
+        check_cancelled()
+        # 5. Await execution (including chassis finally/memory destruction).
         report = await chassis.execute()
 
         # 6. Ephemeral destruction invariant verification
@@ -71,4 +80,11 @@ class EphemeralSquadDispatcher:
             len(chassis.memory.history) == 0
         ), "Ephemeral memory was not wiped on termination!"
 
+        if chassis.is_alive or chassis.memory.history:
+            raise CleanupUnverified("Worker destruction could not be established.")
+        if not isinstance(report, WorkerReport) or report.worker_role != ctx.role.value or report.contract_id != contract.contract_id:
+            raise ValueError("Worker report does not match the actual invocation.")
+        check_cancelled()
+        observe_optional("worker_completed", ctx.task_id, worker_ref, report)
+        check_cancelled()
         return report
